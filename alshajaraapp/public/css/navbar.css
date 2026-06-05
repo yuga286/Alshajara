@@ -1,0 +1,10 @@
+/* Increase ERPNext navbar logo size */
+.navbar-brand img {
+  max-height: 80px !important;   /* try 48px or 56px */
+  width: auto;
+}
+
+/* Optional: increase navbar height slightly */
+.navbar {
+  min-height: 85px;
+}
