@@ -6,30 +6,19 @@ APP_MODULE = "Alshajaraapp"
 
 
 CUSTOM_FIELDS = {
-    "Purchase Order": [
+    "Quotation Item": [
         {
-            "fieldname": "source_quotation",
-            "fieldtype": "Link",
-            "label": "Source Quotation",
-            "options": "Quotation",
-            "insert_after": "supplier",
-            "read_only": 1,
-            "allow_on_submit": 1,
-            "no_copy": 1,
-            "in_standard_filter": 1,
-            "module": APP_MODULE,
-        },
-        {
-            "fieldname": "auto_created_from_quotation",
-            "fieldtype": "Check",
-            "label": "Auto Created from Quotation",
-            "insert_after": "source_quotation",
-            "read_only": 1,
-            "allow_on_submit": 1,
-            "no_copy": 1,
+            "fieldname": "available_stock_qty",
+            "fieldtype": "Float",
+            "label": "Available Stock Qty",
+            "insert_after": "stock_status",
             "hidden": 1,
+            "read_only": 1,
+            "no_copy": 1,
             "module": APP_MODULE,
         },
+    ],
+    "Purchase Order": [
         {
             "fieldname": "reference_quotation",
             "fieldtype": "Link",
@@ -45,17 +34,6 @@ CUSTOM_FIELDS = {
         },
     ],
     "Purchase Order Item": [
-        {
-            "fieldname": "source_quotation_item",
-            "fieldtype": "Data",
-            "label": "Source Quotation Item",
-            "insert_after": "sales_order_item",
-            "read_only": 1,
-            "no_copy": 1,
-            "hidden": 1,
-            "search_index": 1,
-            "module": APP_MODULE,
-        },
         {
             "fieldname": "reference_quotation",
             "fieldtype": "Link",
@@ -94,6 +72,4 @@ def execute():
                 APP_MODULE,
                 update_modified=False,
             )
-
-    frappe.clear_cache(doctype="Purchase Order")
-    frappe.clear_cache(doctype="Purchase Order Item")
+        frappe.clear_cache(doctype=doctype)

@@ -1,5 +1,3 @@
-import json
-
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
@@ -12,11 +10,20 @@ def execute():
                     "fieldname": "stock_status",
                     "fieldtype": "HTML",
                     "label": "Stock Status",
-                    "insert_after": "warehouse",
-                    "columns": 2,
+                    "insert_after": "item_code",
                     "hidden": 0,
                     "read_only": 1,
                     "in_list_view": 1,
+                    "module": "Alshajaraapp",
+                },
+                {
+                    "fieldname": "available_stock_qty",
+                    "fieldtype": "Float",
+                    "label": "Available Stock Qty",
+                    "insert_after": "stock_status",
+                    "hidden": 1,
+                    "read_only": 1,
+                    "no_copy": 1,
                     "module": "Alshajaraapp",
                 }
             ]
@@ -28,58 +35,16 @@ def execute():
         {"dt": "Quotation Item", "fieldname": "stock_status"},
         "module",
         "Alshajaraapp",
-        update_modified=False,
+        update_modified=True,
+    )
+    frappe.db.set_value(
+        "Custom Field",
+        {"dt": "Quotation Item", "fieldname": "available_stock_qty"},
+        "module",
+        "Alshajaraapp",
+        update_modified=True,
     )
 
-    set_property(
-        "Quotation Item",
-        "item_code",
-        "columns",
-        "3",
-        "Int",
-    )
-    set_property(
-        "Quotation Item",
-        "qty",
-        "columns",
-        "1",
-        "Int",
-    )
-    set_property(
-        "Quotation Item",
-        "rate",
-        "columns",
-        "2",
-        "Int",
-    )
-    set_property(
-        "Quotation Item",
-        "amount",
-        "columns",
-        "2",
-        "Int",
-    )
-    set_property(
-        "Quotation Item",
-        "warehouse",
-        "in_list_view",
-        "1",
-        "Check",
-    )
-    set_property(
-        "Quotation Item",
-        "warehouse",
-        "hidden",
-        "0",
-        "Check",
-    )
-    set_property(
-        "Quotation Item",
-        "warehouse",
-        "read_only",
-        "0",
-        "Check",
-    )
     set_property(
         "Quotation Item",
         "warehouse",
@@ -89,13 +54,6 @@ def execute():
     )
     set_property(
         "Quotation Item",
-        "warehouse",
-        "columns",
-        "2",
-        "Int",
-    )
-    set_property(
-        "Quotation Item",
         "stock_status",
         "hidden",
         "0",
@@ -136,29 +94,6 @@ def execute():
         "1",
         "Check",
     )
-    set_property(
-        "Quotation Item",
-        "total_profit_percentage",
-        "columns",
-        "1",
-        "Int",
-    )
-    set_property(
-        "Quotation Item",
-        "stock_status",
-        "columns",
-        "2",
-        "Int",
-    )
-    set_property(
-        "Quotation Item",
-        None,
-        "field_order",
-        json.dumps(get_quotation_item_field_order()),
-        "JSON",
-        for_doctype=True,
-    )
-
     frappe.clear_cache(doctype="Quotation")
     frappe.clear_cache(doctype="Quotation Item")
 
@@ -181,7 +116,7 @@ def set_property(doctype, fieldname, property_name, value, property_type, for_do
             "Property Setter",
             property_setter_name,
             values,
-            update_modified=False,
+            update_modified=True,
         )
         return
 
@@ -193,22 +128,3 @@ def set_property(doctype, fieldname, property_name, value, property_type, for_do
     property_setter.flags.ignore_permissions = True
     property_setter.flags.validate_fields_for_doctype = False
     property_setter.insert()
-
-
-def get_quotation_item_field_order():
-    meta = frappe.get_meta("Quotation Item", cached=False)
-    field_order = [df.fieldname for df in meta.fields if df.fieldname]
-
-    for fieldname in ("warehouse", "stock_status", "total_profit_percentage"):
-        if fieldname in field_order:
-            field_order.remove(fieldname)
-
-    insert_after = "item_code"
-    insert_index = field_order.index(insert_after) + 1 if insert_after in field_order else 0
-    field_order[insert_index:insert_index] = ["warehouse", "stock_status"]
-
-    insert_after = "amount"
-    insert_index = field_order.index(insert_after) + 1 if insert_after in field_order else len(field_order)
-    field_order.insert(insert_index, "total_profit_percentage")
-
-    return field_order

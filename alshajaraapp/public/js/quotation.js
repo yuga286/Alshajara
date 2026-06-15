@@ -1,18 +1,24 @@
-const QUOTATION_ITEM_GRID_CLASS = "alshajara-quotation-items-grid";
-const QUOTATION_ITEM_GRID_LAYOUT = [
-	{ fieldname: "item_code", columns: 3, width: 220 },
-	{ fieldname: "warehouse", columns: 2, width: 180 },
-	{ fieldname: "stock_status", columns: 2, width: 170 },
-	{ fieldname: "qty", columns: 1, width: 90 },
-	{ fieldname: "rate", columns: 2, width: 140 },
-	{ fieldname: "amount", columns: 2, width: 150 },
-	{ fieldname: "total_profit_percentage", columns: 1, width: 120 },
-];
+const QUOTATION_STOCK_STATUS = {
+	LOADING: "loading",
+	IN_STOCK: "in_stock",
+	LOW_STOCK: "low_stock",
+	OUT_OF_STOCK: "out_of_stock",
+	NO_WAREHOUSE: "no_warehouse",
+	INVALID_QTY: "invalid_qty",
+	API_ERROR: "api_error",
+	EMPTY: "empty",
+};
+const QUOTATION_STOCK_STATUS_FALLBACK = "Stock status unavailable";
+const QUOTATION_STOCK_STATUS_ROW_STATES = new Map();
 
 frappe.ui.form.on("Quotation", {
 	refresh(frm) {
 		setup_quotation_stock_status_formatter(frm);
-		update_quotation_stock_statuses(frm);
+		if (frm.doc.docstatus === 0) {
+			update_quotation_stock_statuses(frm);
+		} else {
+			refresh_quotation_stock_statuses_display(frm);
+		}
 
 		if (!frm.is_new()) {
 			frm.add_custom_button(__("+ Add Note"), () => {
@@ -140,6 +146,7 @@ frappe.ui.form.on("Quotation", {
 			row.original_currency = source_currency;
 		}
 
+		preserve_quotation_stock_statuses(frm);
 		frm.refresh_field("items");
 		frm.trigger("calculate_taxes_and_totals");
 		await calculate_quotation_profit(frm, false);
@@ -171,15 +178,10 @@ async function get_exchange_rate(from_currency, to_currency, transaction_date) {
 
 function setup_quotation_stock_status_formatter(frm) {
 	const grid = frm.fields_dict?.items?.grid;
-	apply_quotation_items_grid_docfield_properties(grid);
+	apply_quotation_stock_status_docfield_properties(grid);
 
 	if (grid) {
 		setup_quotation_warehouse_query(frm);
-		lock_quotation_items_grid_refresh(grid);
-		observe_quotation_items_grid(grid);
-		apply_quotation_items_grid_layout(grid);
-		rebuild_quotation_items_grid_if_columns_changed(grid);
-		apply_quotation_items_grid_dom_lock(grid);
 	}
 }
 
@@ -208,173 +210,48 @@ function get_quotation_items_grid_docfield(grid, fieldname) {
 		|| frappe.meta.get_docfield("Quotation Item", fieldname);
 }
 
-function apply_quotation_items_grid_docfield_properties(grid) {
-	for (const column of QUOTATION_ITEM_GRID_LAYOUT) {
-		const meta_df = frappe.meta.get_docfield("Quotation Item", column.fieldname);
-		const grid_df = get_quotation_items_grid_docfield(grid, column.fieldname);
-		const docfields = [...new Set([meta_df, grid_df].filter(Boolean))];
-
-		for (const df of docfields) {
-			df.hidden = 0;
-			df.in_list_view = 1;
-			df.columns = column.columns;
-			df.colsize = column.columns;
-		}
-	}
-
+function apply_quotation_stock_status_docfield_properties(grid) {
 	const stock_status_df = get_quotation_items_grid_docfield(grid, "stock_status");
 	if (stock_status_df) {
+		stock_status_df.hidden = 0;
+		stock_status_df.in_list_view = 1;
 		stock_status_df.formatter = format_quotation_stock_status;
 		stock_status_df.read_only = 1;
 	}
-
-	const warehouse_df = get_quotation_items_grid_docfield(grid, "warehouse");
-	if (warehouse_df) {
-		warehouse_df.read_only = 0;
-	}
-
-	const total_profit_df = get_quotation_items_grid_docfield(grid, "total_profit_percentage");
-	if (total_profit_df) {
-		total_profit_df.read_only = 1;
-	}
-}
-
-function apply_quotation_items_grid_layout(grid) {
-	if (!grid) {
-		return;
-	}
-
-	apply_quotation_items_grid_docfield_properties(grid);
-
-	const visible_columns = QUOTATION_ITEM_GRID_LAYOUT
-		.map((column) => {
-			const df = get_quotation_items_grid_docfield(grid, column.fieldname);
-			if (!df) {
-				return null;
-			}
-
-			df.columns = column.columns;
-			df.colsize = column.columns;
-			return [df, column.columns];
-		})
-		.filter(Boolean);
-
-	grid.wrapper?.addClass(QUOTATION_ITEM_GRID_CLASS);
-	grid.visible_columns = visible_columns;
-	grid.user_defined_columns = visible_columns.map(([df]) => df);
-}
-
-function lock_quotation_items_grid_refresh(grid) {
-	if (!grid || grid._quotation_items_grid_refresh_locked) {
-		return;
-	}
-
-	const original_refresh = grid.refresh.bind(grid);
-	grid.refresh = function (...args) {
-		apply_quotation_items_grid_layout(grid);
-		const result = original_refresh(...args);
-		apply_quotation_items_grid_layout(grid);
-		apply_quotation_items_grid_dom_lock(grid);
-		return result;
-	};
-
-	grid._quotation_items_grid_refresh_locked = true;
-}
-
-function apply_quotation_items_grid_dom_lock(grid) {
-	if (!grid?.wrapper) {
-		return;
-	}
-
-	grid.wrapper.addClass(QUOTATION_ITEM_GRID_CLASS);
-	grid.header_row?.configure_columns_button?.hide();
-
-	for (const column of QUOTATION_ITEM_GRID_LAYOUT) {
-		grid.wrapper
-			.find(`.grid-static-col[data-fieldname="${column.fieldname}"]`)
-			.css({
-				flex: `0 0 ${column.width}px`,
-				width: `${column.width}px`,
-				"min-width": `${column.width}px`,
-				"max-width": `${column.width}px`,
-			});
-	}
-
-	grid.wrapper
-		.find(".grid-heading-row .data-row.row, .grid-body .rows .data-row.row")
-		.css({
-			"flex-wrap": "nowrap",
-			"justify-content": "flex-start",
-		});
-}
-
-function observe_quotation_items_grid(grid) {
-	if (!grid?.wrapper || grid._quotation_items_grid_observer || !window.MutationObserver) {
-		return;
-	}
-
-	let scheduled = false;
-	const observer = new MutationObserver(() => {
-		if (scheduled) {
-			return;
-		}
-
-		scheduled = true;
-		setTimeout(() => {
-			scheduled = false;
-			apply_quotation_items_grid_layout(grid);
-			apply_quotation_items_grid_dom_lock(grid);
-		}, 0);
-	});
-
-	observer.observe(grid.wrapper.get(0), {
-		childList: true,
-		subtree: true,
-	});
-
-	grid._quotation_items_grid_observer = observer;
-}
-
-function get_quotation_items_grid_column_signature(grid) {
-	return (grid.visible_columns || [])
-		.map(([df, colsize]) => `${df.fieldname}:${colsize}`)
-		.join("|");
-}
-
-function rebuild_quotation_items_grid_if_columns_changed(grid) {
-	const signature = get_quotation_items_grid_column_signature(grid);
-	if (!signature || grid._quotation_items_grid_column_signature === signature) {
-		return;
-	}
-
-	grid._quotation_items_grid_column_signature = signature;
-	grid.grid_rows = [];
-	grid.grid_rows_by_docname = {};
-	grid.header_row = null;
-	grid.header_search = null;
-	grid.wrapper?.find(".grid-body .rows .grid-row").remove();
-	grid.wrapper?.find(".grid-heading-row .grid-row").remove();
-	grid.refresh();
 }
 
 function update_quotation_stock_statuses(frm) {
 	return Promise.all((frm.doc.items || []).map((row) => {
+		restore_quotation_stock_status_from_row_cache(row);
 		return update_quotation_stock_status(frm, row.doctype, row.name);
 	}));
 }
 
 function format_quotation_stock_status(value) {
-	if (!value) return "";
-
 	const text = cstr(value);
+	if (!text) {
+		return "";
+	}
+
 	const escaped_value = frappe.utils.escape_html(text);
 
 	if (text.includes("In Stock")) {
 		return `<span class="indicator green">${escaped_value}</span>`;
 	}
 
-	if (text.includes("Partial")) {
+	if (text.includes("Partial") || text.includes("Low Stock")) {
 		return `<span class="indicator blue">${escaped_value}</span>`;
+	}
+
+	if (
+		text.includes("Checking")
+		|| text.includes("Select")
+		|| text.includes("Invalid")
+		|| text.includes("No Default")
+		|| text.includes("Failed")
+		|| text.includes("unavailable")
+	) {
+		return `<span class="indicator orange">${escaped_value}</span>`;
 	}
 
 	return `<span class="indicator red">${escaped_value}</span>`;
@@ -382,6 +259,7 @@ function format_quotation_stock_status(value) {
 
 function refresh_quotation_stock_statuses_display(frm) {
 	(frm.doc.items || []).forEach((row) => {
+		restore_quotation_stock_status_from_row_cache(row);
 		refresh_quotation_stock_status_display(frm, row.name);
 	});
 }
@@ -391,28 +269,226 @@ function refresh_quotation_stock_status_display(frm, cdn) {
 	const grid_row = grid?.grid_rows_by_docname?.[cdn];
 
 	if (grid_row) {
-		const row = locals[grid_row.doc?.doctype]?.[cdn] || grid_row.doc;
-		const html = format_quotation_stock_status(row?.stock_status);
-
 		grid_row.refresh_field("stock_status");
-		grid_row.columns?.stock_status?.static_area?.html(html);
-		if (grid_row.on_grid_fields_dict?.stock_status?.html) {
-			grid_row.on_grid_fields_dict.stock_status.html(html);
-		} else {
-			grid_row.columns?.stock_status?.field_area?.html(html);
-		}
 		return;
 	}
 
 	frm.refresh_field("items");
 }
 
-async function set_quotation_stock_status(frm, cdt, cdn, value) {
-	const row = locals[cdt]?.[cdn];
-	if (row) {
-		row.stock_status = value;
+function make_quotation_stock_status_state(status, message, options = {}) {
+	return {
+		status,
+		message: cstr(message),
+		available_qty: options.available_qty,
+		required_qty: options.required_qty,
+		is_valid_stock: Boolean(options.is_valid_stock),
+	};
+}
+
+function get_quotation_stock_status_row_key(row) {
+	if (!row?.name) {
+		return "";
 	}
 
+	return `${row.doctype || "Quotation Item"}:${row.name}`;
+}
+
+function make_quotation_stock_status_truth(row, has_item_added) {
+	const stock_status = has_item_added ? cstr(row.stock_status || QUOTATION_STOCK_STATUS_FALLBACK) : "";
+	return {
+		hasItemAdded: has_item_added,
+		stockStatus: stock_status,
+		lastValidStockStatus: row.stock_status ? cstr(row.stock_status) : "",
+		request_id: 0,
+		request_key: "",
+		current_state: make_quotation_stock_status_state(
+			QUOTATION_STOCK_STATUS.EMPTY,
+			stock_status
+		),
+		last_valid_state: row.stock_status
+			? make_quotation_stock_status_state(
+				classify_quotation_stock_status_message(row.stock_status),
+				row.stock_status,
+				{ is_valid_stock: true }
+			)
+			: null,
+	};
+}
+
+function cache_quotation_stock_status_truth(row, truth) {
+	const row_key = get_quotation_stock_status_row_key(row);
+	if (row_key) {
+		QUOTATION_STOCK_STATUS_ROW_STATES.set(row_key, truth);
+	}
+}
+
+function restore_quotation_stock_status_from_row_cache(row) {
+	const row_key = get_quotation_stock_status_row_key(row);
+	if (!row_key) {
+		return null;
+	}
+
+	const cached_truth = QUOTATION_STOCK_STATUS_ROW_STATES.get(row_key);
+	if (!cached_truth) {
+		return null;
+	}
+
+	row._stock_status_truth = cached_truth;
+	if (cached_truth.hasItemAdded && !row.stock_status) {
+		row.stock_status = cached_truth.stockStatus
+			|| cached_truth.lastValidStockStatus
+			|| cached_truth.last_valid_state?.message
+			|| QUOTATION_STOCK_STATUS_FALLBACK;
+	}
+
+	return cached_truth;
+}
+
+function preserve_quotation_stock_statuses(frm) {
+	for (const row of frm?.doc?.items || []) {
+		restore_quotation_stock_status_from_row_cache(row);
+	}
+}
+
+function get_quotation_stock_status_truth(row) {
+	// Single source of truth for stock status stability. The grid field is only
+	// a display projection of this object, so refresh/reload code cannot invent
+	// a different status.
+	if (!row._stock_status_truth) {
+		const cached_truth = restore_quotation_stock_status_from_row_cache(row);
+		if (cached_truth) {
+			return cached_truth;
+		}
+
+		const has_item_added = Boolean(row.item_code || row.stock_status);
+		row._stock_status_truth = make_quotation_stock_status_truth(row, has_item_added);
+		cache_quotation_stock_status_truth(row, row._stock_status_truth);
+	}
+
+	return row._stock_status_truth;
+}
+
+function get_quotation_stock_status_fallback_message(truth) {
+	return truth.lastValidStockStatus || truth.last_valid_state?.message || QUOTATION_STOCK_STATUS_FALLBACK;
+}
+
+function classify_quotation_stock_status_message(message) {
+	const text = cstr(message);
+
+	if (text.includes("In Stock")) {
+		return QUOTATION_STOCK_STATUS.IN_STOCK;
+	}
+	if (text.includes("Partial") || text.includes("Low Stock")) {
+		return QUOTATION_STOCK_STATUS.LOW_STOCK;
+	}
+	if (text.includes("Out of Stock")) {
+		return QUOTATION_STOCK_STATUS.OUT_OF_STOCK;
+	}
+	if (text.includes("No Default")) {
+		return QUOTATION_STOCK_STATUS.NO_WAREHOUSE;
+	}
+	if (text.includes("Invalid")) {
+		return QUOTATION_STOCK_STATUS.INVALID_QTY;
+	}
+
+	return QUOTATION_STOCK_STATUS.EMPTY;
+}
+
+function is_quotation_stock_state_valid(state) {
+	return Boolean(state && typeof state.message === "string" && state.status);
+}
+
+function normalize_quotation_stock_status_response(message, required_qty) {
+	const response_message = cstr(message?.message || "");
+	const available_qty = normalize_quotation_stock_quantity(message?.available_qty, 0);
+	const response_required_qty = normalize_quotation_stock_quantity(message?.required_qty, required_qty);
+	const status = message?.status || classify_quotation_stock_status_message(response_message);
+
+	if (!response_message) {
+		return make_quotation_stock_status_state(
+			QUOTATION_STOCK_STATUS.API_ERROR,
+			"Stock Check Failed",
+			{ required_qty }
+		);
+	}
+
+	return make_quotation_stock_status_state(
+		status === "green"
+			? QUOTATION_STOCK_STATUS.IN_STOCK
+			: status === "blue"
+				? QUOTATION_STOCK_STATUS.LOW_STOCK
+				: status === "red"
+					? QUOTATION_STOCK_STATUS.OUT_OF_STOCK
+					: classify_quotation_stock_status_message(response_message),
+		response_message,
+		{
+			available_qty,
+			required_qty: response_required_qty,
+			is_valid_stock: ["green", "blue", "red"].includes(status),
+		}
+	);
+}
+
+function apply_quotation_stock_status_state(frm, cdt, cdn, next_state) {
+	const row = locals[cdt]?.[cdn];
+	if (!row || !is_quotation_stock_state_valid(next_state)) {
+		return;
+	}
+
+	const truth = get_quotation_stock_status_truth(row);
+	let display_state = next_state;
+
+	if (next_state.status === QUOTATION_STOCK_STATUS.EMPTY && !truth.hasItemAdded) {
+		truth.current_state = next_state;
+		truth.stockStatus = "";
+		row.stock_status = "";
+		cache_quotation_stock_status_truth(row, truth);
+		refresh_quotation_stock_status_display(frm, cdn);
+		return;
+	}
+
+	if (next_state.status !== QUOTATION_STOCK_STATUS.EMPTY) {
+		truth.hasItemAdded = true;
+	}
+
+	// After the item has existed once, no later path may make stock_status blank.
+	// Loading, invalid responses, and failed API calls reuse the last valid
+	// status when possible, otherwise the stable fallback text is shown.
+	if (
+		truth.hasItemAdded
+		&& (
+			!display_state.message
+			|| display_state.status === QUOTATION_STOCK_STATUS.LOADING
+			|| display_state.status === QUOTATION_STOCK_STATUS.API_ERROR
+			|| display_state.status === QUOTATION_STOCK_STATUS.INVALID_QTY
+		)
+	) {
+		truth.current_state = next_state;
+		display_state = make_quotation_stock_status_state(
+			truth.last_valid_state?.status || QUOTATION_STOCK_STATUS.EMPTY,
+			get_quotation_stock_status_fallback_message(truth)
+		);
+	} else {
+		truth.current_state = next_state;
+	}
+
+	if (next_state.is_valid_stock) {
+		truth.last_valid_state = next_state;
+		truth.lastValidStockStatus = next_state.message;
+	}
+
+	if (next_state.available_qty !== undefined) {
+		const available_stock_qty = normalize_quotation_stock_quantity(next_state.available_qty, 0);
+		if (flt(row.available_stock_qty) !== available_stock_qty) {
+			row.available_stock_qty = available_stock_qty;
+			frappe.model.set_value(cdt, cdn, "available_stock_qty", available_stock_qty);
+		}
+	}
+
+	truth.stockStatus = display_state.message || get_quotation_stock_status_fallback_message(truth);
+	row.stock_status = truth.stockStatus;
+	cache_quotation_stock_status_truth(row, truth);
 	refresh_quotation_stock_status_display(frm, cdn);
 }
 
@@ -424,16 +500,59 @@ async function update_quotation_stock_status(frm, cdt, cdn) {
 	}
 
 	if (!row.item_code) {
-		await set_quotation_stock_status(frm, cdt, cdn, "");
+		const truth = get_quotation_stock_status_truth(row);
+		if (truth.hasItemAdded) {
+			apply_quotation_stock_status_state(
+				frm,
+				cdt,
+				cdn,
+				make_quotation_stock_status_state(
+					QUOTATION_STOCK_STATUS.EMPTY,
+					get_quotation_stock_status_fallback_message(truth)
+				)
+			);
+			return;
+		}
+
+		apply_quotation_stock_status_state(
+			frm,
+			cdt,
+			cdn,
+			make_quotation_stock_status_state(
+				QUOTATION_STOCK_STATUS.EMPTY,
+				QUOTATION_STOCK_STATUS_FALLBACK
+			)
+		);
 		return;
 	}
 
+	get_quotation_stock_status_truth(row).hasItemAdded = true;
+
 	if (!row.warehouse) {
-		await set_quotation_stock_status(frm, cdt, cdn, "");
+		apply_quotation_stock_status_state(
+			frm,
+			cdt,
+			cdn,
+			make_quotation_stock_status_state(QUOTATION_STOCK_STATUS.NO_WAREHOUSE, "Select Warehouse")
+		);
 		return;
 	}
 
 	const required_qty = get_quotation_stock_required_qty(row);
+	if (required_qty == null || required_qty <= 0) {
+		apply_quotation_stock_status_state(
+			frm,
+			cdt,
+			cdn,
+			make_quotation_stock_status_state(
+				QUOTATION_STOCK_STATUS.INVALID_QTY,
+				QUOTATION_STOCK_STATUS_FALLBACK,
+				{ required_qty }
+			)
+		);
+		return;
+	}
+
 	const request_key = [
 		row.item_code,
 		row.warehouse || "",
@@ -441,33 +560,104 @@ async function update_quotation_stock_status(frm, cdt, cdn) {
 		frm.doc.company || "",
 	].join("|");
 
-	row._stock_status_request_key = request_key;
+	const truth = get_quotation_stock_status_truth(row);
+	const request_id = truth.request_id + 1;
+	truth.request_id = request_id;
+	truth.request_key = request_key;
 
-	const r = await frappe.call({
-		method: "alshajaraapp.api.comman.get_stock_status",
-		args: {
-			item_code: row.item_code,
-			company: frm.doc.company,
-			warehouse: row.warehouse,
-			qty: required_qty,
-		},
-	});
+	apply_quotation_stock_status_state(
+		frm,
+		cdt,
+		cdn,
+		make_quotation_stock_status_state(
+			QUOTATION_STOCK_STATUS.LOADING,
+			"Checking Stock...",
+			{ required_qty }
+		)
+	);
 
-	const latest_row = locals[cdt]?.[cdn];
-	if (!latest_row || latest_row._stock_status_request_key !== request_key) {
-		return;
+	try {
+		const r = await frappe.call({
+			method: "alshajaraapp.api.comman.get_stock_status",
+			args: {
+				item_code: row.item_code,
+				company: frm.doc.company,
+				warehouse: row.warehouse,
+				qty: required_qty,
+			},
+		});
+
+		const latest_row = locals[cdt]?.[cdn];
+		const latest_truth = latest_row ? get_quotation_stock_status_truth(latest_row) : null;
+
+		// Race guard: a slow older request must never overwrite the status from a
+		// newer item/warehouse/qty request.
+		if (
+			!latest_row
+			|| latest_truth.request_id !== request_id
+			|| latest_truth.request_key !== request_key
+		) {
+			return;
+		}
+
+		apply_quotation_stock_status_state(
+			frm,
+			cdt,
+			cdn,
+			normalize_quotation_stock_status_response(r.message, required_qty)
+		);
+	} catch (error) {
+		const latest_row = locals[cdt]?.[cdn];
+		const latest_truth = latest_row ? get_quotation_stock_status_truth(latest_row) : null;
+
+		if (
+			!latest_row
+			|| latest_truth.request_id !== request_id
+			|| latest_truth.request_key !== request_key
+		) {
+			return;
+		}
+
+		apply_quotation_stock_status_state(
+			frm,
+			cdt,
+			cdn,
+			make_quotation_stock_status_state(
+				QUOTATION_STOCK_STATUS.API_ERROR,
+				"Stock Check Failed",
+				{ required_qty }
+			)
+		);
+		frappe.log_error?.(error, "Quotation stock status check failed");
+	}
+}
+
+function normalize_quotation_stock_quantity(value, fallback = null) {
+	if (value === null || value === undefined || value === "") {
+		return fallback;
 	}
 
-	await set_quotation_stock_status(frm, cdt, cdn, r.message?.message || "");
+	const numeric_value = Number(value);
+	if (!Number.isFinite(numeric_value)) {
+		return fallback;
+	}
+
+	return flt(numeric_value);
 }
 
 function get_quotation_stock_required_qty(row) {
-	const stock_qty = flt(row.stock_qty);
-	if (stock_qty) {
+	const stock_qty = normalize_quotation_stock_quantity(row.stock_qty);
+	if (stock_qty !== null && stock_qty > 0) {
 		return stock_qty;
 	}
 
-	return flt(row.qty) * flt(row.conversion_factor || 1);
+	const qty = normalize_quotation_stock_quantity(row.qty);
+	if (qty === null) {
+		return null;
+	}
+
+	const conversion_factor = normalize_quotation_stock_quantity(row.conversion_factor, 1) || 1;
+	return qty * conversion_factor;
 }
 
 function schedule_quotation_stock_status_update(frm, cdt, cdn) {
@@ -531,6 +721,7 @@ async function calculate_quotation_profit(frm, persist = false) {
 		frm.doc.total_profit_percentage = flt(grand_profit_percentage, 2);
 	}
 
+	preserve_quotation_stock_statuses(frm);
 	frm.refresh_fields([
 		"quotation_total_cost",
 		"quotation_total_selling_price",

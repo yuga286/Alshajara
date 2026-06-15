@@ -1,4 +1,5 @@
 import frappe
+from frappe.utils import flt
 from frappe.utils import now, strip_html, now_datetime, add_days , getdate
 from frappe import _
 import io
@@ -95,9 +96,22 @@ import frappe
 
 @frappe.whitelist()
 def get_stock_status(item_code, company=None, qty=0, warehouse=None):
-
     if not item_code:
-        return {}
+        return {
+            "status": "orange",
+            "message": "Stock status unavailable",
+            "available_qty": 0,
+            "required_qty": _parse_stock_quantity(qty),
+        }
+
+    required_qty = _parse_stock_quantity(qty)
+    if required_qty is None or required_qty <= 0:
+        return {
+            "status": "orange",
+            "message": "Invalid Quantity",
+            "available_qty": 0,
+            "required_qty": required_qty,
+        }
 
     # Prefer explicit warehouse passed from client
     if warehouse:
@@ -123,7 +137,7 @@ def get_stock_status(item_code, company=None, qty=0, warehouse=None):
             "status": "orange",
             "message": "No Default Warehouse",
             "available_qty": 0,
-            "required_qty": float(qty or 0),
+            "required_qty": required_qty,
         }
     actual_qty = frappe.db.get_value(
         "Bin",
@@ -134,8 +148,9 @@ def get_stock_status(item_code, company=None, qty=0, warehouse=None):
         "actual_qty"
     ) or 0
 
-    available_qty = float(actual_qty or 0)
-    required_qty = float(qty or 0)
+    available_qty = _parse_stock_quantity(actual_qty)
+    if available_qty is None:
+        available_qty = 0
 
     if available_qty >= required_qty:
         return {
@@ -159,3 +174,13 @@ def get_stock_status(item_code, company=None, qty=0, warehouse=None):
         "available_qty": available_qty,
         "required_qty": required_qty,
     }
+
+
+def _parse_stock_quantity(value):
+    if value is None or value == "":
+        return None
+
+    try:
+        return flt(float(value))
+    except (TypeError, ValueError):
+        return None

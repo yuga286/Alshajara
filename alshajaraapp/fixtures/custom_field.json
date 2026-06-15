@@ -537,7 +537,7 @@
     "fieldname": "note_remarks",
     "fieldtype": "Small Text",
     "label": "Note/Remarks",
-    "insert_after": "product_name",
+    "insert_after": "issue_split_from",
     "read_only": 0
   },
   {
@@ -583,6 +583,7 @@
   "options": "Currency",
   "fetch_from": "country.currency",
   "insert_after": "country",
+  "fetch_if_empty": 1,
   "in_list_view": 1
   },
   {
@@ -601,10 +602,13 @@
     "name": "Opportunity Item-stock_status",
     "dt": "Opportunity Item",
     "fieldname": "stock_status",
-    "fieldtype": "HTML",
+    "fieldtype": "Data",
     "label": "Stock Status",
     "insert_after": "uom",
-    "in_list_view": 1
+    "hidden": 0,
+    "read_only": 1,
+    "in_list_view": 1,
+    "module": "Alshajaraapp"
   },
   {
     "doctype": "Custom Field",
@@ -615,7 +619,10 @@
     "label": "Warehouse",
     "options": "Warehouse",
     "insert_after": "item_name",
+    "hidden": 0,
+    "read_only": 0,
     "in_list_view": 1,
+    "module": "Alshajaraapp",
     "link_filters": "[[\"Warehouse\",\"company\",\"=\",\"eval:parent.company\"]]"
   },
   {
@@ -623,13 +630,25 @@
     "name": "Quotation Item-stock_status",
     "dt": "Quotation Item",
     "fieldname": "stock_status",
-    "fieldtype": "HTML",
+    "fieldtype": "Data",
     "label": "Stock Status",
     "insert_after": "warehouse",
     "hidden": 0,
     "read_only": 1,
     "in_list_view": 1,
-    "columns": 2,
+    "module": "Alshajaraapp"
+  },
+  {
+    "doctype": "Custom Field",
+    "name": "Quotation Item-available_stock_qty",
+    "dt": "Quotation Item",
+    "fieldname": "available_stock_qty",
+    "fieldtype": "Float",
+    "label": "Available Stock Qty",
+    "insert_after": "stock_status",
+    "hidden": 1,
+    "read_only": 1,
+    "no_copy": 1,
     "module": "Alshajaraapp"
   },
   {
@@ -685,5 +704,92 @@
     "no_copy": 1,
     "hidden": 1,
     "module": "Alshajaraapp"
+  },
+  {
+    "doctype": "Custom Field",
+    "name": "Purchase Order-source_quotation",
+    "dt": "Purchase Order",
+    "fieldname": "source_quotation",
+    "fieldtype": "Link",
+    "label": "Source Quotation",
+    "options": "Quotation",
+    "insert_after": "supplier",
+    "read_only": 1,
+    "allow_on_submit": 1,
+    "no_copy": 1,
+    "in_standard_filter": 1,
+    "module": "Alshajaraapp"
+  },
+  {
+    "doctype": "Custom Field",
+    "name": "Purchase Order-auto_created_from_quotation",
+    "dt": "Purchase Order",
+    "fieldname": "auto_created_from_quotation",
+    "fieldtype": "Check",
+    "label": "Auto Created from Quotation",
+    "insert_after": "source_quotation",
+    "read_only": 1,
+    "allow_on_submit": 1,
+    "no_copy": 1,
+    "hidden": 1,
+    "module": "Alshajaraapp"
+  },
+  {
+    "doctype": "Custom Field",
+    "name": "Purchase Order-reference_quotation",
+    "dt": "Purchase Order",
+    "fieldname": "reference_quotation",
+    "fieldtype": "Link",
+    "label": "Reference Quotation",
+    "options": "Quotation",
+    "insert_after": "source_quotation",
+    "read_only": 1,
+    "allow_on_submit": 1,
+    "no_copy": 1,
+    "hidden": 1,
+    "in_standard_filter": 1,
+    "module": "Alshajaraapp"
+  },
+  {
+    "doctype": "Custom Field",
+    "name": "Purchase Order Item-source_quotation_item",
+    "dt": "Purchase Order Item",
+    "fieldname": "source_quotation_item",
+    "fieldtype": "Data",
+    "label": "Source Quotation Item",
+    "insert_after": "sales_order_item",
+    "read_only": 1,
+    "no_copy": 1,
+    "hidden": 1,
+    "search_index": 1,
+    "module": "Alshajaraapp"
+  },
+  {
+    "doctype": "Custom Field",
+    "name": "Purchase Order Item-reference_quotation",
+    "dt": "Purchase Order Item",
+    "fieldname": "reference_quotation",
+    "fieldtype": "Link",
+    "label": "Reference Quotation",
+    "options": "Quotation",
+    "insert_after": "source_quotation_item",
+    "read_only": 1,
+    "no_copy": 1,
+    "hidden": 1,
+    "module": "Alshajaraapp"
+  },
+  {
+    "doctype": "Custom Field",
+    "name": "Purchase Order Item-reference_quotation_item",
+    "dt": "Purchase Order Item",
+    "fieldname": "reference_quotation_item",
+    "fieldtype": "Data",
+    "label": "Reference Quotation Item",
+    "insert_after": "reference_quotation",
+    "read_only": 1,
+    "no_copy": 1,
+    "hidden": 1,
+    "search_index": 1,
+    "module": "Alshajaraapp"
   }
-]
+  ]

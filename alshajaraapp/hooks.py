@@ -9,6 +9,7 @@ app_license = "mit"
 fixtures = [
     {"dt": "Custom Field", "filters": [["module", "=", "Alshajaraapp"]]},
     {"dt": "Property Setter", "filters": [["module", "=", "Alshajaraapp"]]},
+
 ]
 
 doctype_js = {
@@ -17,15 +18,17 @@ doctype_js = {
     "Opportunity": "public/js/opportunity.js",
     "Sales Invoice": "public/js/sales_invoice.js",
     "Purchase Order": "public/js/purchase_order.js",
+    "Item": "public/js/item.js",
+    "Price List": "public/js/price_list.js",
 }
 
 doctype_list_js = {
-    "Quotation": "public/js/quotation_list.js"
+    "Quotation": "public/js/quotation_list.js",
+    "Opportunity": "public/js/opportunity_list.js"
 }
 
 app_include_css = [
     "/assets/alshajaraapp/css/navbar.css",
-    "/assets/alshajaraapp/css/quotation_item_grid.css",
 ]
 
 after_migrate = [
@@ -39,6 +42,7 @@ doc_events = {
         "before_validate": "alshajaraapp.api.quotation.ensure_quotation_conversion_rate",
         "before_save": "alshajaraapp.api.quotation.compute_and_persist_quotation_profit",
         "after_insert": "alshajaraapp.api.quotation.generate_quotation_barcode",
+        "on_submit": "alshajaraapp.quotation.quotation.create_purchase_orders_for_shortages",
     },
     "Sales Order": {
         "before_insert": "alshajaraapp.api.comman.reset_document_barcode_on_amend",

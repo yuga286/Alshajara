@@ -6,8 +6,15 @@ from dataclasses import dataclass
 import erpnext
 import frappe
 from erpnext.setup.utils import get_exchange_rate
-from frappe import _
+from frappe import _ as frappe_translate
 from frappe.utils import flt, get_link_to_form, getdate, nowdate
+
+
+def _(message):
+    try:
+        return frappe_translate(message)
+    except Exception:
+        return message
 
 
 @dataclass
@@ -21,29 +28,145 @@ class QuotationShortageLine:
     uom: str
     stock_uom: str
     conversion_factor: float
-    supplier: str
+    supplier: str | None
     schedule_date: str
     rate: float
+    available_qty: float
 
 
-class QuotationStockShortageEvaluator:
+class QuotationPurchaseOrderGenerator:
+    """Create Purchase Orders for Quotation shortage quantities.
+
+    This class is called from the Quotation `on_submit` hook only. It uses the
+    numeric available_stock_qty captured from the stock check state, not the
+    rendered HTML stock_status field.
+    ERPNext Purchase Orders have one supplier, so shortages are grouped by
+    supplier.
+    """
+
+    LOGGER_NAME = "alshajaraapp.quotation_auto_po"
+
     def __init__(self, quotation):
         self.quotation = quotation
+        self.created_purchase_orders = []
         self.skipped_messages = []
+        self.warning_messages = []
+        self.purchase_defaults_by_supplier = {}
 
-    def update_doc_fields(self):
-        self.get_shortage_lines(update_doc_fields=True)
-        return self.quotation
+    def run(self):
+        if self.quotation.docstatus != 1:
+            self.log_debug(
+                "Skipping Quotation {0}; docstatus is {1}.".format(
+                    self.quotation.name, self.quotation.docstatus
+                )
+            )
+            return []
 
-    def get_shortage_lines(self, existing_qty_by_quotation_item=None, update_doc_fields=False):
-        existing_qty_by_quotation_item = existing_qty_by_quotation_item or {}
+        self.log_debug("Starting Quotation auto PO for {0}.".format(self.quotation.name))
+
+        if not self.quotation.get("company"):
+            self.log_skip(_("Quotation {0} has no company.").format(self.quotation.name))
+            self.notify_user()
+            return []
+
+        self.lock_quotation()
+
+        existing_purchase_orders = self.get_existing_purchase_orders()
+        if existing_purchase_orders:
+            self.created_purchase_orders.extend(existing_purchase_orders)
+            self.log_debug(
+                "Skipping Quotation {0}; Purchase Order already exists: {1}".format(
+                    self.quotation.name, existing_purchase_orders
+                )
+            )
+            self.notify_user(duplicate=True)
+            return self.created_purchase_orders
+
+        shortage_lines = self.get_shortage_lines()
+        self.log_debug(
+            "Quotation {0}: unavailable_items_count={1}".format(
+                self.quotation.name,
+                len(shortage_lines),
+            )
+        )
+        if not shortage_lines:
+            self.log_debug(
+                "No stock shortages detected for Quotation {0}; no Purchase Order created.".format(
+                    self.quotation.name
+                )
+            )
+            self.notify_user()
+            return []
+
+        grouped_shortage_lines = self.group_shortage_lines_by_supplier(shortage_lines)
+        if not grouped_shortage_lines:
+            self.notify_user()
+            return []
+
+        for supplier, supplier_lines in grouped_shortage_lines.items():
+            try:
+                self.log_debug(
+                    "Attempting Purchase Order insert for Quotation {0}; supplier={1}; items={2}".format(
+                        self.quotation.name,
+                        supplier,
+                        [line.item_code for line in supplier_lines],
+                    )
+                )
+                purchase_order = self.create_purchase_order(supplier, supplier_lines)
+                self.created_purchase_orders.append(purchase_order.name)
+                self.log_debug(
+                    "Created Purchase Order {0} for Quotation {1}; supplier={2}; items={3}".format(
+                        purchase_order.name,
+                        self.quotation.name,
+                        supplier,
+                        [line.item_code for line in supplier_lines],
+                    )
+                )
+            except Exception:
+                self.log_skip(
+                    _("Could not create Purchase Order for supplier {0} from Quotation {1}.").format(
+                        supplier,
+                        self.quotation.name,
+                    ),
+                    frappe.get_traceback(),
+                )
+
+        self.notify_user()
+        return self.created_purchase_orders
+
+    def lock_quotation(self):
+        frappe.db.sql(
+            "select name from `tabQuotation` where name = %s for update",
+            self.quotation.name,
+        )
+
+    def get_existing_purchase_orders(self):
+        reference_fields = [
+            fieldname
+            for fieldname in ("reference_quotation", "source_quotation")
+            if frappe.db.has_column("Purchase Order", fieldname)
+        ]
+        if not reference_fields:
+            return []
+
+        conditions = " or ".join(f"po.{fieldname} = %(quotation)s" for fieldname in reference_fields)
+        rows = frappe.db.sql(
+            f"""
+            select po.name
+            from `tabPurchase Order` po
+            where po.docstatus < 2
+                and ({conditions})
+            order by po.creation asc
+            """,
+            {"quotation": self.quotation.name},
+            as_dict=True,
+        )
+        return [row.name for row in rows]
+
+    def get_shortage_lines(self):
         shortage_lines = []
-        available_qty_by_item_warehouse = {}
 
         for row in self.quotation.get("items", []):
-            if update_doc_fields:
-                self.reset_shortage_fields_for_row(row)
-
             item_code = row.get("item_code")
             if not item_code:
                 self.log_skip(_("Quotation row {0} has no item.").format(row.idx))
@@ -55,9 +178,14 @@ class QuotationStockShortageEvaluator:
                 continue
 
             if not flt(item_details.get("is_stock_item")):
+                self.log_debug(
+                    "Quotation {0} row {1}: item={2} is not a stock item; skipped.".format(
+                        self.quotation.name, row.idx, item_code
+                    )
+                )
                 continue
 
-            warehouse = row.get("warehouse")
+            warehouse = self.get_warehouse_for_row(row, item_details)
             if not warehouse:
                 self.log_skip(
                     _("No warehouse set for item {0} in Quotation {1}.").format(
@@ -66,85 +194,174 @@ class QuotationStockShortageEvaluator:
                 )
                 continue
 
-            conversion_factor = flt(row.get("conversion_factor")) or 1
-            quoted_stock_qty = flt(row.get("stock_qty")) or (flt(row.get("qty")) * conversion_factor)
-            availability_key = (item_code, warehouse)
+            required_qty = self.get_required_qty(row)
+            if required_qty <= 0:
+                continue
 
-            if availability_key not in available_qty_by_item_warehouse:
-                available_qty_by_item_warehouse[availability_key] = self.get_available_qty(
-                    item_code, warehouse
-                )
-
-            available_qty = available_qty_by_item_warehouse[availability_key]
-            shortage_stock_qty = max(quoted_stock_qty - available_qty, 0)
-            available_qty_by_item_warehouse[availability_key] = max(available_qty - quoted_stock_qty, 0)
-            shortage_qty = shortage_stock_qty / conversion_factor if conversion_factor else 0
-
-            if update_doc_fields:
-                row.shortage_qty = flt(shortage_qty)
+            available_stock_qty = self.get_available_stock_qty(row)
+            shortage_qty = self.get_shortage_qty(required_qty, available_stock_qty)
 
             if shortage_qty <= 0:
                 continue
 
-            existing_qty = flt(existing_qty_by_quotation_item.get(row.name))
-            remaining_qty = shortage_qty - existing_qty
-            if remaining_qty <= 0:
-                continue
-
-            supplier = self.get_supplier_for_item(item_code)
+            conversion_factor = flt(row.get("conversion_factor")) or 1
+            shortage_stock_qty = shortage_qty * conversion_factor
+            supplier = self.get_supplier_for_item(item_code, row)
             if not supplier:
-                self.log_skip(
-                    _("No default or prioritized supplier configured for item {0}.").format(
+                self.log_warning(
+                    _("No supplier configured for shortage item {0}; using the Purchase Order supplier selected from other rows if available.").format(
                         item_code
                     )
                 )
-                continue
+
+            self.log_debug(
+                "Quotation {0}: item={1}, required_qty={2}, available_qty={3}, shortage_qty={4}, supplier={5}".format(
+                    self.quotation.name,
+                    item_code,
+                    required_qty,
+                    available_stock_qty,
+                    shortage_qty,
+                    supplier,
+                )
+            )
 
             schedule_date = self.quotation.get("valid_till") or self.quotation.get("transaction_date") or nowdate()
             uom = row.get("uom") or item_details.get("stock_uom")
             stock_uom = row.get("stock_uom") or item_details.get("stock_uom")
-            currency, buying_price_list, _conversion_rate = self.get_purchase_defaults(supplier)
+            rate = 0
+            if supplier:
+                currency, buying_price_list, _conversion_rate = self.get_purchase_defaults(supplier)
+                rate = self.get_supplier_rate(
+                    item_code,
+                    supplier,
+                    uom,
+                    shortage_qty,
+                    schedule_date,
+                    currency=currency,
+                    buying_price_list=buying_price_list,
+                )
 
             shortage_lines.append(
                 QuotationShortageLine(
                     quotation_item=row.name,
                     item_code=item_code,
-                    item_name=row.get("item_name") or item_details.get("item_name"),
+                    item_name=row.get("item_name") or item_details.get("item_name") or item_code,
                     warehouse=warehouse,
-                    qty=remaining_qty,
-                    stock_qty=remaining_qty * conversion_factor,
+                    qty=shortage_qty,
+                    stock_qty=shortage_stock_qty,
                     uom=uom,
                     stock_uom=stock_uom,
                     conversion_factor=conversion_factor,
                     supplier=supplier,
                     schedule_date=schedule_date,
-                    rate=self.get_supplier_rate(
-                        item_code,
-                        supplier,
-                        uom,
-                        remaining_qty,
-                        schedule_date,
-                        currency=currency,
-                        buying_price_list=buying_price_list,
-                    ),
+                    rate=rate,
+                    available_qty=available_stock_qty,
                 )
             )
 
         return shortage_lines
 
-    def reset_shortage_fields_for_row(self, row):
-        row.shortage_qty = 0
-        linked_purchase_order = row.get("linked_purchase_order")
-        if not linked_purchase_order or not self.is_active_purchase_order(linked_purchase_order):
-            row.purchase_order_generated = 0
-            row.linked_purchase_order = None
+    def get_required_qty(self, row):
+        return flt(row.get("qty") or 0)
 
-    def is_active_purchase_order(self, purchase_order):
-        if not purchase_order:
+    def get_required_stock_qty(self, row, conversion_factor=None):
+        return self.get_required_qty(row)
+
+    def get_available_stock_qty(self, row):
+        return flt(row.get("available_stock_qty") or 0)
+
+    def get_shortage_qty(self, required_qty, available_stock_qty):
+        return max(flt(required_qty) - flt(available_stock_qty), 0)
+
+    def get_shortage_stock_qty(self, required_stock_qty, available_stock_qty):
+        return self.get_shortage_qty(required_stock_qty, available_stock_qty)
+
+    def should_create_po_for_item(self, row):
+        required_qty = self.get_required_qty(row)
+        if required_qty <= 0:
             return False
 
-        docstatus = frappe.db.get_value("Purchase Order", purchase_order, "docstatus")
-        return docstatus is not None and flt(docstatus) < 2
+        available_stock_qty = self.get_available_stock_qty(row)
+        return self.get_shortage_qty(required_qty, available_stock_qty) > 0
+
+    def has_unavailable_stock(self, quotation_items):
+        return any(self.should_create_po_for_item(row) for row in quotation_items or [])
+
+    def group_shortage_lines_by_supplier(self, shortage_lines):
+        grouped = defaultdict(list)
+        missing_supplier_items = []
+
+        for line in shortage_lines:
+            if line.supplier:
+                grouped[line.supplier].append(line)
+            else:
+                missing_supplier_items.append(line.item_code)
+
+        if missing_supplier_items:
+            self.log_skip(
+                _("No supplier configured for shortage item(s): {0}.").format(
+                    ", ".join(missing_supplier_items)
+                )
+            )
+
+        if len(grouped) > 1:
+            self.log_debug(
+                "Quotation {0} shortage items grouped by supplier: {1}".format(
+                    self.quotation.name,
+                    {supplier: [line.item_code for line in lines] for supplier, lines in grouped.items()},
+                )
+            )
+
+        return grouped
+
+    def create_purchase_order(self, supplier, lines):
+        currency, buying_price_list, conversion_rate = self.get_purchase_defaults(supplier)
+        schedule_date = min(getdate(line.schedule_date) for line in lines)
+
+        purchase_order = frappe.new_doc("Purchase Order")
+        purchase_order.supplier = supplier
+        purchase_order.company = self.quotation.company
+        purchase_order.transaction_date = self.quotation.get("transaction_date") or nowdate()
+        purchase_order.schedule_date = schedule_date
+        purchase_order.currency = currency
+        purchase_order.conversion_rate = conversion_rate
+        purchase_order.buying_price_list = buying_price_list
+
+        if frappe.get_meta("Purchase Order").has_field("source_quotation"):
+            purchase_order.source_quotation = self.quotation.name
+        if frappe.get_meta("Purchase Order").has_field("reference_quotation"):
+            purchase_order.reference_quotation = self.quotation.name
+        if frappe.get_meta("Purchase Order").has_field("auto_created_from_quotation"):
+            purchase_order.auto_created_from_quotation = 1
+
+        for line in lines:
+            purchase_order_item = {
+                "item_code": line.item_code,
+                "item_name": line.item_name,
+                "schedule_date": line.schedule_date,
+                "qty": line.qty,
+                "stock_qty": line.stock_qty,
+                "uom": line.uom,
+                "stock_uom": line.stock_uom,
+                "conversion_factor": line.conversion_factor,
+                "warehouse": line.warehouse,
+                "rate": line.rate,
+                "price_list_rate": line.rate,
+            }
+
+            if frappe.get_meta("Purchase Order Item").has_field("source_quotation_item"):
+                purchase_order_item["source_quotation_item"] = line.quotation_item
+            if frappe.get_meta("Purchase Order Item").has_field("reference_quotation"):
+                purchase_order_item["reference_quotation"] = self.quotation.name
+            if frappe.get_meta("Purchase Order Item").has_field("reference_quotation_item"):
+                purchase_order_item["reference_quotation_item"] = line.quotation_item
+
+            purchase_order.append("items", purchase_order_item)
+
+        purchase_order.flags.ignore_permissions = True
+        purchase_order.insert(ignore_permissions=True)
+        purchase_order.submit()
+        return purchase_order
 
     def get_item_details(self, item_code):
         return frappe.db.get_value(
@@ -154,16 +371,14 @@ class QuotationStockShortageEvaluator:
             as_dict=True,
         )
 
-    def get_available_qty(self, item_code, warehouse):
-        return flt(
-            frappe.db.get_value(
-                "Bin",
-                {"item_code": item_code, "warehouse": warehouse},
-                "actual_qty",
-            )
-        )
+    def get_warehouse_for_row(self, row, item_details=None):
+        warehouse = row.get("warehouse") or self.quotation.get("set_warehouse")
+        if warehouse:
+            return warehouse
 
-    def get_supplier_for_item(self, item_code):
+        return None
+
+    def get_supplier_for_item(self, item_code, row=None):
         default_supplier = frappe.db.get_value(
             "Item Default",
             {"parent": item_code, "company": self.quotation.company},
@@ -179,7 +394,64 @@ class QuotationStockShortageEvaluator:
             order_by="idx asc",
         )
         suppliers = [supplier for supplier in suppliers if supplier]
-        return suppliers[0] if suppliers else None
+        if suppliers:
+            return suppliers[0]
+
+        if row:
+            for fieldname in ("supplier", "default_supplier", "preferred_supplier"):
+                if row.get(fieldname):
+                    return row.get(fieldname)
+
+        return self.get_project_or_company_supplier()
+
+    def get_project_or_company_supplier(self):
+        for doctype, docname in (
+            ("Project", self.quotation.get("project")),
+            ("Company", self.quotation.get("company")),
+        ):
+            if not docname:
+                continue
+
+            meta = frappe.get_meta(doctype)
+            for fieldname in ("default_supplier", "supplier"):
+                if meta.has_field(fieldname):
+                    supplier = frappe.db.get_value(doctype, docname, fieldname)
+                    if supplier:
+                        return supplier
+
+        return None
+
+    def get_purchase_defaults(self, supplier):
+        if supplier in self.purchase_defaults_by_supplier:
+            return self.purchase_defaults_by_supplier[supplier]
+
+        company_currency = erpnext.get_company_currency(self.quotation.company)
+        supplier_defaults = frappe.db.get_value(
+            "Supplier",
+            supplier,
+            ["default_currency", "default_price_list"],
+            as_dict=True,
+        ) or {}
+
+        buying_price_list = supplier_defaults.get("default_price_list") or frappe.db.get_single_value(
+            "Buying Settings", "buying_price_list"
+        )
+        price_list_currency = None
+        if buying_price_list:
+            price_list_currency = frappe.db.get_value("Price List", buying_price_list, "currency")
+
+        currency = supplier_defaults.get("default_currency") or price_list_currency or company_currency
+        conversion_rate = 1
+        if currency != company_currency:
+            conversion_rate = get_exchange_rate(
+                currency,
+                company_currency,
+                self.quotation.get("transaction_date") or nowdate(),
+                "for_buying",
+            )
+
+        self.purchase_defaults_by_supplier[supplier] = (currency, buying_price_list, conversion_rate)
+        return self.purchase_defaults_by_supplier[supplier]
 
     def get_supplier_rate(
         self,
@@ -221,214 +493,62 @@ class QuotationStockShortageEvaluator:
 
         return 0
 
-    def get_purchase_defaults(self, supplier):
-        company_currency = erpnext.get_company_currency(self.quotation.company)
-        supplier_defaults = frappe.db.get_value(
-            "Supplier",
-            supplier,
-            ["default_currency", "default_price_list"],
-            as_dict=True,
-        ) or {}
-
-        buying_price_list = supplier_defaults.get("default_price_list") or frappe.db.get_single_value(
-            "Buying Settings", "buying_price_list"
-        )
-        price_list_currency = None
-        if buying_price_list:
-            price_list_currency = frappe.db.get_value("Price List", buying_price_list, "currency")
-
-        currency = supplier_defaults.get("default_currency") or price_list_currency or company_currency
-        conversion_rate = 1
-        if currency != company_currency:
-            conversion_rate = get_exchange_rate(
-                currency,
-                company_currency,
-                self.quotation.get("transaction_date") or nowdate(),
-                "for_buying",
-            )
-
-        return currency, buying_price_list, conversion_rate
-
     def log_skip(self, message, details=None):
         self.skipped_messages.append(message)
-        frappe.log_error(
-            title=_("Quotation auto Purchase Order skipped item"),
+        self.log_debug(message)
+        self.log_error(
+            title=_("Quotation auto Purchase Order skipped"),
             message=details or message,
         )
 
-
-class QuotationPurchaseOrderGenerator(QuotationStockShortageEvaluator):
-    def __init__(self, quotation):
-        super().__init__(quotation)
-        self.created_purchase_orders = []
-        self.purchase_defaults_by_supplier = {}
-
-    def run(self):
-        if self.quotation.docstatus != 1:
-            return []
-
-        if not self.quotation.get("company"):
-            self.log_skip(_("Quotation {0} has no company.").format(self.quotation.name))
-            self.notify_user()
-            return []
-
-        self.lock_quotation()
-        existing_qty_by_quotation_item = self.get_existing_po_qty_by_quotation_item()
-        shortage_lines = self.get_shortage_lines(existing_qty_by_quotation_item)
-
-        if shortage_lines:
-            for supplier, lines in self.group_by_supplier(shortage_lines).items():
-                try:
-                    purchase_order = self.create_purchase_order(supplier, lines)
-                    self.created_purchase_orders.append(purchase_order.name)
-                    self.mark_quotation_items_as_generated(lines, purchase_order.name)
-                except Exception:
-                    self.log_skip(
-                        _("Could not create Purchase Order for supplier {0} from Quotation {1}.").format(
-                            supplier, self.quotation.name
-                        ),
-                        frappe.get_traceback(),
-                    )
-
-        self.update_parent_generation_flag()
-        self.notify_user()
-        return self.created_purchase_orders
-
-    def lock_quotation(self):
-        if not self.quotation.name:
-            return
-
-        frappe.db.sql(
-            "select name from `tabQuotation` where name = %s for update",
-            self.quotation.name,
+    def log_warning(self, message):
+        self.warning_messages.append(message)
+        self.log_debug(message)
+        self.log_error(
+            title=_("Quotation auto Purchase Order warning"),
+            message=message,
         )
 
-    def group_by_supplier(self, shortage_lines):
-        grouped = defaultdict(list)
-        for line in shortage_lines:
-            grouped[line.supplier].append(line)
-        return grouped
+    def log_error(self, title, message):
+        try:
+            frappe.log_error(title=title, message=message)
+        except Exception:
+            pass
 
-    def create_purchase_order(self, supplier, lines):
-        currency, buying_price_list, conversion_rate = self.get_purchase_defaults(supplier)
-        schedule_date = min(getdate(line.schedule_date) for line in lines)
+    def log_debug(self, message):
+        try:
+            frappe.logger(self.LOGGER_NAME).info(message)
+        except Exception:
+            pass
 
-        purchase_order = frappe.new_doc("Purchase Order")
-        purchase_order.supplier = supplier
-        purchase_order.company = self.quotation.company
-        purchase_order.transaction_date = self.quotation.get("transaction_date") or nowdate()
-        purchase_order.schedule_date = schedule_date
-        purchase_order.currency = currency
-        purchase_order.conversion_rate = conversion_rate
-        purchase_order.buying_price_list = buying_price_list
-        purchase_order.source_quotation = self.quotation.name
-        purchase_order.auto_created_from_quotation = 1
-
-        for line in lines:
-            purchase_order.append(
-                "items",
-                {
-                    "item_code": line.item_code,
-                    "item_name": line.item_name,
-                    "schedule_date": line.schedule_date,
-                    "qty": line.qty,
-                    "stock_qty": line.stock_qty,
-                    "uom": line.uom,
-                    "stock_uom": line.stock_uom,
-                    "conversion_factor": line.conversion_factor,
-                    "warehouse": line.warehouse,
-                    "rate": line.rate,
-                    "price_list_rate": line.rate,
-                    "source_quotation_item": line.quotation_item,
-                },
-            )
-
-        purchase_order.insert(ignore_permissions=True)
-        return purchase_order
-
-    def get_purchase_defaults(self, supplier):
-        if supplier in self.purchase_defaults_by_supplier:
-            return self.purchase_defaults_by_supplier[supplier]
-
-        self.purchase_defaults_by_supplier[supplier] = super().get_purchase_defaults(supplier)
-        return self.purchase_defaults_by_supplier[supplier]
-
-    def get_existing_po_qty_by_quotation_item(self):
-        if not frappe.db.has_column("Purchase Order", "source_quotation"):
-            return {}
-
-        if not frappe.db.has_column("Purchase Order Item", "source_quotation_item"):
-            return {}
-
-        rows = frappe.db.sql(
-            """
-            select
-                poi.source_quotation_item,
-                sum(poi.qty) as qty
-            from `tabPurchase Order Item` poi
-            inner join `tabPurchase Order` po on po.name = poi.parent
-            where po.docstatus < 2
-                and po.source_quotation = %(quotation)s
-                and ifnull(poi.source_quotation_item, '') != ''
-            group by poi.source_quotation_item
-            """,
-            {"quotation": self.quotation.name},
-            as_dict=True,
-        )
-        return {row.source_quotation_item: flt(row.qty) for row in rows}
-
-    def mark_quotation_items_as_generated(self, lines, purchase_order_name):
-        for line in lines:
-            frappe.db.set_value(
-                "Quotation Item",
-                line.quotation_item,
-                {
-                    "purchase_order_generated": 1,
-                    "linked_purchase_order": purchase_order_name,
-                    "shortage_qty": line.qty,
-                },
-                update_modified=False,
-            )
-
-    def update_parent_generation_flag(self):
-        generated = 1 if self.has_generated_purchase_orders() else 0
-        frappe.db.set_value(
-            "Quotation",
-            self.quotation.name,
-            "auto_purchase_order_created",
-            generated,
-            update_modified=False,
-        )
-
-    def has_generated_purchase_orders(self):
-        if not frappe.db.has_column("Purchase Order", "source_quotation"):
-            return False
-
-        return bool(
-            frappe.db.exists(
-                "Purchase Order",
-                {
-                    "source_quotation": self.quotation.name,
-                    "docstatus": ["<", 2],
-                },
-            )
-        )
-
-    def notify_user(self):
+    def notify_user(self, duplicate=False):
         messages = []
-        if self.created_purchase_orders:
+
+        if duplicate and self.created_purchase_orders:
             links = [
                 get_link_to_form("Purchase Order", po_name)
                 for po_name in self.created_purchase_orders
             ]
-            messages.append(_("Created Purchase Order(s): {0}").format(", ".join(links)))
+            messages.append(
+                _("Purchase Order already exists for this Quotation: {0}").format(", ".join(links))
+            )
+        elif self.created_purchase_orders:
+            links = [
+                get_link_to_form("Purchase Order", po_name)
+                for po_name in self.created_purchase_orders
+            ]
+            messages.append(_("Created Purchase Order: {0}").format(", ".join(links)))
+
+        if self.warning_messages:
+            messages.append("<br>".join(self.warning_messages))
 
         if self.skipped_messages:
             messages.append(
-                _("Some quotation shortage items were skipped. Check Error Log for details: {0}").format(
+                _("Automatic Purchase Order creation skipped some work. Check Error Log: {0}").format(
                     "; ".join(self.skipped_messages)
                 )
             )
 
         if messages:
-            frappe.msgprint("<br>".join(messages), indicator="orange" if self.skipped_messages else "green")
+            indicator = "orange" if self.skipped_messages or self.warning_messages else "green"
+            frappe.msgprint("<br>".join(messages), indicator=indicator)

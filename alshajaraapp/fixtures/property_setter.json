@@ -132,94 +132,6 @@
   },
   {
     "doctype": "Property Setter",
-    "name": "Quotation Item-item_code-columns",
-    "doctype_or_field": "DocField",
-    "doc_type": "Quotation Item",
-    "field_name": "item_code",
-    "property": "columns",
-    "property_type": "Int",
-    "value": "3",
-    "module": "Alshajaraapp"
-  },
-  {
-    "doctype": "Property Setter",
-    "name": "Quotation Item-qty-columns",
-    "doctype_or_field": "DocField",
-    "doc_type": "Quotation Item",
-    "field_name": "qty",
-    "property": "columns",
-    "property_type": "Int",
-    "value": "1",
-    "module": "Alshajaraapp"
-  },
-  {
-    "doctype": "Property Setter",
-    "name": "Quotation Item-rate-columns",
-    "doctype_or_field": "DocField",
-    "doc_type": "Quotation Item",
-    "field_name": "rate",
-    "property": "columns",
-    "property_type": "Int",
-    "value": "2",
-    "module": "Alshajaraapp"
-  },
-  {
-    "doctype": "Property Setter",
-    "name": "Quotation Item-amount-columns",
-    "doctype_or_field": "DocField",
-    "doc_type": "Quotation Item",
-    "field_name": "amount",
-    "property": "columns",
-    "property_type": "Int",
-    "value": "2",
-    "module": "Alshajaraapp"
-  },
-  {
-    "doctype": "Property Setter",
-    "name": "Quotation Item-warehouse-in_list_view",
-    "doctype_or_field": "DocField",
-    "doc_type": "Quotation Item",
-    "field_name": "warehouse",
-    "property": "in_list_view",
-    "property_type": "Check",
-    "value": "1",
-    "module": "Alshajaraapp"
-  },
-  {
-    "doctype": "Property Setter",
-    "name": "Quotation Item-warehouse-columns",
-    "doctype_or_field": "DocField",
-    "doc_type": "Quotation Item",
-    "field_name": "warehouse",
-    "property": "columns",
-    "property_type": "Int",
-    "value": "2",
-    "module": "Alshajaraapp"
-  },
-  {
-    "doctype": "Property Setter",
-    "name": "Quotation Item-warehouse-hidden",
-    "doctype_or_field": "DocField",
-    "doc_type": "Quotation Item",
-    "field_name": "warehouse",
-    "property": "hidden",
-    "property_type": "Check",
-    "value": "0",
-    "module": "Alshajaraapp"
-  },
-  {
-    "doctype": "Property Setter",
-    "name": "Quotation Item-warehouse-read_only",
-    "doctype_or_field": "DocField",
-    "doc_type": "Quotation Item",
-    "field_name": "warehouse",
-    "property": "read_only",
-    "property_type": "Check",
-    "value": "0",
-    "module": "Alshajaraapp"
-  },
-  {
-    "doctype": "Property Setter",
     "name": "Quotation Item-warehouse-link_filters",
     "doctype_or_field": "DocField",
     "doc_type": "Quotation Item",
@@ -264,17 +176,6 @@
   },
   {
     "doctype": "Property Setter",
-    "name": "Quotation Item-stock_status-columns",
-    "doctype_or_field": "DocField",
-    "doc_type": "Quotation Item",
-    "field_name": "stock_status",
-    "property": "columns",
-    "property_type": "Int",
-    "value": "2",
-    "module": "Alshajaraapp"
-  },
-  {
-    "doctype": "Property Setter",
     "name": "Quotation Item-total_profit_percentage-hidden",
     "doctype_or_field": "DocField",
     "doc_type": "Quotation Item",
@@ -303,17 +204,6 @@
     "field_name": "total_profit_percentage",
     "property": "in_list_view",
     "property_type": "Check",
-    "value": "1",
-    "module": "Alshajaraapp"
-  },
-  {
-    "doctype": "Property Setter",
-    "name": "Quotation Item-total_profit_percentage-columns",
-    "doctype_or_field": "DocField",
-    "doc_type": "Quotation Item",
-    "field_name": "total_profit_percentage",
-    "property": "columns",
-    "property_type": "Int",
     "value": "1",
     "module": "Alshajaraapp"
   }
