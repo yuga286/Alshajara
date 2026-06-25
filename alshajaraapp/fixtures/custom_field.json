@@ -83,7 +83,7 @@
     "name": "Opportunity-last_communicated_note",
     "dt": "Opportunity",
     "fieldname": "last_communicated_note",
-    "fieldtype": "Data",
+    "fieldtype": "Text Editor",
     "label": "Last Note",
     "read_only": 1,
     "insert_after": "notes"
