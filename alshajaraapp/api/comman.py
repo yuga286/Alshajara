@@ -63,9 +63,15 @@ def send_payment_reminder(invoice):
         "Sales Invoice",
         invoice
     )
+    
+    email_id = frappe.db.get_value(
+        "Address",
+        doc.customer_address,
+        "email_id"
+    )
 
     frappe.sendmail(
-        recipients=[doc.contact_email],
+        recipients=[email_id],
         subject=f"Payment Reminder - {doc.name}",
         message=f"""
         Dear Customer,

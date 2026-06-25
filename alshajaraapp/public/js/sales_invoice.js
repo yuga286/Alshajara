@@ -46,6 +46,9 @@ frappe.ui.form.on("Sales Invoice", {
                         },
 
                         callback() {
+                            console.log(frm.doc.contact_email)
+                            
+                            console.log(frm.doc.name)
                             frappe.msgprint(
                                 __("Payment Reminder Sent")
                             );
@@ -58,3 +61,4 @@ frappe.ui.form.on("Sales Invoice", {
         }
     }
 });
+

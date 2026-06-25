@@ -177,35 +177,35 @@ function apply_opportunity_items_grid_stock_docfields(grid) {
 	}
 }
 
-// function format_opportunity_stock_status(value) {
-//     const text = cstr(value);
-//     if (!text) {
-//         return "";
-//     }
+function format_opportunity_stock_status(value) {
+    const text = cstr(value);
+    if (!text) {
+        return "";
+    }
 
-//     const escaped_value = frappe.utils.escape_html(text);
+    const escaped_value = frappe.utils.escape_html(text);
 
-//     if (text.includes("In Stock")) {
-//         return `<span class="indicator green">${escaped_value}</span>`;
-//     }
+    if (text.includes("In Stock")) {
+        return `<span class="indicator green">${escaped_value}</span>`;
+    }
 
-//     if (text.includes("Partial") || text.includes("Low Stock")) {
-//         return `<span class="indicator blue">${escaped_value}</span>`;
-//     }
+    if (text.includes("Partial") || text.includes("Low Stock")) {
+        return `<span class="indicator blue">${escaped_value}</span>`;
+    }
 
-// 	if (
-// 		text.includes("Checking")
-// 		|| text.includes("Invalid")
-// 		|| text.includes("Failed")
-// 		|| text.includes("unavailable")
-// 		|| text.includes("Select")
-// 		|| text.includes("No Default")
-// 	) {
-// 		return `<span class="indicator orange">${escaped_value}</span>`;
-// 	}
+	if (
+		text.includes("Checking")
+		|| text.includes("Invalid")
+		|| text.includes("Failed")
+		|| text.includes("unavailable")
+		|| text.includes("Select")
+		|| text.includes("No Default")
+	) {
+		return `<span class="indicator orange">${escaped_value}</span>`;
+	}
 
-//     return `<span class="indicator red">${escaped_value}</span>`;
-// }
+    return `<span class="indicator red">${escaped_value}</span>`;
+}
 
 function refresh_opportunity_stock_status_display(frm, cdn) {
     const grid = frm.fields_dict?.items?.grid;
@@ -335,15 +335,15 @@ function get_opportunity_stock_status_fallback_message(truth) {
     return truth.lastValidStockStatus || truth.last_valid_state?.message || OPPORTUNITY_STOCK_STATUS_FALLBACK;
 }
 
-// function classify_opportunity_stock_status_message(message) {
-//     const text = cstr(message);
-//     if (text.includes("In Stock")) return OPPORTUNITY_STOCK_STATUS.IN_STOCK;
-//     if (text.includes("Partial") || text.includes("Low Stock")) return OPPORTUNITY_STOCK_STATUS.LOW_STOCK;
-//     if (text.includes("Out of Stock")) return OPPORTUNITY_STOCK_STATUS.OUT_OF_STOCK;
-//     if (text.includes("No Default")) return OPPORTUNITY_STOCK_STATUS.NO_WAREHOUSE;
-//     if (text.includes("Invalid")) return OPPORTUNITY_STOCK_STATUS.INVALID_QTY;
-//     return OPPORTUNITY_STOCK_STATUS.EMPTY;
-// }
+function classify_opportunity_stock_status_message(message) {
+    const text = cstr(message);
+    if (text.includes("In Stock")) return OPPORTUNITY_STOCK_STATUS.IN_STOCK;
+    if (text.includes("Partial") || text.includes("Low Stock")) return OPPORTUNITY_STOCK_STATUS.LOW_STOCK;
+    if (text.includes("Out of Stock")) return OPPORTUNITY_STOCK_STATUS.OUT_OF_STOCK;
+    if (text.includes("No Default")) return OPPORTUNITY_STOCK_STATUS.NO_WAREHOUSE;
+    if (text.includes("Invalid")) return OPPORTUNITY_STOCK_STATUS.INVALID_QTY;
+    return OPPORTUNITY_STOCK_STATUS.EMPTY;
+}
 
 function is_opportunity_stock_state_valid(state) {
     return Boolean(state && typeof state.message === "string" && state.status);

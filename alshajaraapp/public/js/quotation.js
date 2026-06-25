@@ -12,6 +12,10 @@ const QUOTATION_STOCK_STATUS_FALLBACK = "Stock status unavailable";
 const QUOTATION_STOCK_STATUS_ROW_STATES = new Map();
 
 frappe.ui.form.on("Quotation", {
+	before_workflow_action(frm) {
+		validate_quotation_reject_lost_reasons(frm);
+	},
+
 	refresh(frm) {
 		setup_quotation_stock_status_formatter(frm);
 		if (frm.doc.docstatus === 0) {
@@ -162,6 +166,20 @@ frappe.ui.form.on("Quotation", {
 		return calculate_quotation_profit(frm, true);
 	},
 });
+
+function validate_quotation_reject_lost_reasons(frm) {
+	if (frm.selected_workflow_action !== "Reject") {
+		return;
+	}
+
+	const lost_reasons = frm.doc.lost_reasons || [];
+	const has_lost_reason = lost_reasons.some((row) => row.lost_reason);
+
+	if (!has_lost_reason) {
+		frm.scroll_to_field("lost_reasons");
+		frappe.throw(__("Lost Reasons is required before rejecting this Quotation."));
+	}
+}
 
 async function get_exchange_rate(from_currency, to_currency, transaction_date) {
 	const response = await frappe.call({

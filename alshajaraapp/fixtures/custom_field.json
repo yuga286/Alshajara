@@ -791,5 +791,18 @@
     "hidden": 1,
     "search_index": 1,
     "module": "Alshajaraapp"
+  },
+  {
+    "doctype": "Custom Field",
+    "name": "Country-territory",
+    "dt": "Country",
+    "fieldname": "territory",
+    "fieldtype": "Link",
+    "label": "Territory",
+    "options": "Territory",
+    "insert_after": "country_name",
+    "in_list_view": 1,
+    "reqd": 0,
+    "read_only": 0
   }
   ]

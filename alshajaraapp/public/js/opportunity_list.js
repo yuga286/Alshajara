@@ -1,16 +1,20 @@
+
 frappe.listview_settings['Opportunity'] = {
-    get_indicator(doc) {
+     formatters: {
+        stock_status(value) {
+            if (value === "In Stock") {
+                return `<span class="indicator green"></span> ${value}`;
+            }
 
-        if (doc.stock_status_text === "In Stock") {
-            return ["In Stock", "green", "stock_status_text,=,In Stock"];
-        }
+            if (value === "Low Stock") {
+                return `<span class="indicator orange"></span> ${value}`;
+            }
 
-        if (doc.stock_status_text === "Partial Stock") {
-            return ["Partial Stock", "orange", "stock_status_text,=,Partial Stock"];
-        }
+            if (value === "Out of Stock") {
+                return `<span class="indicator red"></span> ${value}`;
+            }
 
-        if (doc.stock_status_text === "Out of Stock") {
-            return ["Out of Stock", "red", "stock_status_text,=,Out of Stock"];
+            return value;
         }
     }
 };

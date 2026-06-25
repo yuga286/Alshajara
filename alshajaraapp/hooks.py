@@ -31,9 +31,9 @@ app_include_css = [
     "/assets/alshajaraapp/css/navbar.css",
 ]
 
-after_migrate = [
-    "alshajaraapp.patches.set_sales_order_purchase_order_field_order.apply_sales_order_purchase_order_field_order",
-]
+# after_migrate = [
+#     "alshajaraapp.patches.set_sales_order_purchase_order_field_order.apply_sales_order_purchase_order_field_order",
+# ]
 
 doc_events = {
     "Quotation": {
@@ -47,7 +47,7 @@ doc_events = {
     "Sales Order": {
         "before_insert": "alshajaraapp.api.comman.reset_document_barcode_on_amend",
         "after_insert": "alshajaraapp.api.comman.generate_document_barcode",
-        "on_submit": "alshajaraapp.sales_order.sales_order.create_purchase_orders_for_shortages",
+        # "on_submit": "alshajaraapp.sales_order.sales_order.create_purchase_orders_for_shortages",
     },
     "Sales Invoice": {
         "before_insert": "alshajaraapp.api.comman.reset_document_barcode_on_amend",

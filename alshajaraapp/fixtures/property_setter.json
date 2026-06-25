@@ -206,5 +206,16 @@
     "property_type": "Check",
     "value": "1",
     "module": "Alshajaraapp"
+  },
+  {
+    "doctype": "Property Setter",
+    "name": "Quotation-lost_reasons-read_only",
+    "doctype_or_field": "DocField",
+    "doc_type": "Quotation",
+    "field_name": "lost_reasons",
+    "property": "read_only",
+    "property_type": "Check",
+    "value": "0",
+    "module": "Alshajaraapp"
   }
 ]
