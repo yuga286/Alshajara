@@ -13,7 +13,7 @@ const QUOTATION_STOCK_STATUS_ROW_STATES = new Map();
 
 frappe.ui.form.on("Quotation", {
 	before_workflow_action(frm) {
-		validate_quotation_reject_lost_reasons(frm);
+		return validate_quotation_reject_lost_reasons(frm);
 	},
 
 	refresh(frm) {
@@ -174,11 +174,24 @@ function validate_quotation_reject_lost_reasons(frm) {
 
 	const lost_reasons = frm.doc.lost_reasons || [];
 	const has_lost_reason = lost_reasons.some((row) => row.lost_reason);
+	const has_detailed_reason = Boolean(cstr(frm.doc.order_lost_reason).trim());
 
-	if (!has_lost_reason) {
-		frm.scroll_to_field("lost_reasons");
-		frappe.throw(__("Lost Reasons is required before rejecting this Quotation."));
+	if (has_lost_reason || has_detailed_reason) {
+		return;
 	}
+
+	frm.scroll_to_field("lost_reasons");
+
+	// Frappe freezes the page before before_workflow_action runs. Since we block
+	// the transition before the workflow API call, explicitly clear that freeze.
+	frappe.dom.unfreeze();
+	frappe.msgprint({
+		title: __("Missing Lost Reason"),
+		message: __("Lost Reasons or Detailed Reason is required before rejecting this Quotation."),
+		indicator: "red",
+	});
+
+	return Promise.reject(new Error("Lost Reasons required for Reject workflow action"));
 }
 
 async function get_exchange_rate(from_currency, to_currency, transaction_date) {
