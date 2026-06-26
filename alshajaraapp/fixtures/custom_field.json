@@ -804,5 +804,20 @@
     "in_list_view": 1,
     "reqd": 0,
     "read_only": 0
+  },
+  {
+    "doctype": "Custom Field",
+    "dt": "Quotation",
+    "name": "Quotation-quotation_total_cost",
+    "label": "Quotation Total Cost",
+    "fieldname": "quotation_total_cost",
+    "fieldtype": "Currency",
+    "insert_after": "grand_total",
+    "read_only": 1,
+    "precision": "currency_precision",
+    "default": "0",
+    "in_list_view": 0,
+    "print_hide": 0,
+    "allow_on_submit": 1
   }
   ]
